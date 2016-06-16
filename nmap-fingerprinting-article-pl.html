@@ -1,0 +1,512 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<HTML>
+<HEAD>
+<TITLE>Remote OS Detection via TCP/IP Fingerprinting - Polskie</TITLE>
+<META NAME="generator" CONTENT="vim 5.6">
+<META NAME="description" CONTENT="How to glean
+precious information about a host by querying its TCP/IP stack.
+Classical methods of OS Detection, stack fingerprinting tools, Fyodor's (nmap) implementation">
+<META HTTP-EQUIV="content-type" CONTENT-TYPE="text/html; charset=utf-8">
+</HEAD>
+
+<BODY BGCOLOR="#ffffff" TEXT="#111111" >
+<center>
+<font size="3" color="#222222">Polskie tłumaczenie artykułu Fyodora o fingerprintigu<br>
+<b>Poluvex, mike, px </b>: wielkie dzięki za pomoc ;)<br>
+Autor nie bierze odpowiedzialności za tłumaczenie, które było traktowane jako pouczająca zabawa,
+jednak wszelkie uwagi i komentarze proszę nadsyłać
+pod <a href="mailto:oyamawizard.ae.krakow.pl">ten adres</a>, zwłaszcza jeżeli będą to błędy 
+rzeczowe, lub stylistyczne utrudniające zrozumienie tekstu. Polskie znaki zostały zakodowane
+zgodnie z normą ISO-8859-2.<br>
+Data ukończenia : 12.XII.2000
+</font><br><br>
+</center>
+
+<PRE>
+<font color="#89abcd">ABSTRAKT</font>
+Ten dokument opisuje, jak uzyskać informacje o danym hoście poprzez jego
+stos TCP/IP. Najpierw zaprezentuję 'klasyczne' metody ustalania OS danego hosta, nie 
+angażujące techniki 'stack fingerprinting' (w tłumaczeniu będzie używane to pojęcie, a nie polski
+odpowiednik 'odcisk palca stosu' - po prostu brzmi to ładniej. Potem opiszę obecny stan rozwoju 
+narzędzi 'stack fingerprinting'.  Następnie będą informacje o różnych technikach
+zmuszanie hostów do podawania informacji o sobie. Na końcu opiszę szczegółowo moją
+(nmap) implementację, poprzedzoną informacjami, jakie uzyskałem poprzez nmap'a o wielu
+popularnych site'ach internetowych.
+
+<font color="#789abc">WSTĘP</font>
+Myślę, że użyteczność techniki pozwalającej na wykrywanie jaki OS działa na zdalnym
+hoście jest dość oczywista, więc ten rodział będzie raczej krótki. Jednym z
+najlepszych przykładów tej użyteczności jest fakt, że wiele dziur w bezpieczeństwie zależy od
+wersji OS'a. Powiedzmy, że wykonaliśmy 'test' jakiegoś hosta i znaleźliśmy otwarty port 53.
+Jeśli jest to dziurawa wersja Binda, możemy mieć tylko jedną szansę na próbę włamania, ponieważ
+zła próba zakończy się 'wywaleniem' demona. Mając narzędzie używające TCP/IP fingerprint szybko
+dowiesz się, czy na tej maszynie uruchomiony jest Solaris 2.51 czy Linux 2.0.35 i
+'zaaplikujesz' właściwy shellcode.
+Gorzej, jeśli ktoś skanuje 500000 hostów w celu sprawdzenia ich OS'ów i
+otwartych portów. Wtedy gdy natrafi na (powiedzmy) dziurę w Sun'owskim demonie comsat, może
+przeszukać grep'nąć swoją listę w poszukiwaniu 'UDP/512' i 'Solaris 2.6' i natychmiast
+dostaje całe strony hostów podatny na ten atak. Należy nadmienić, że jest to zachowanie typowe
+dla script kiddies. Nie pokazałeś żadnych umiejętności i nikt nie będzie nawet pod najmniejszym
+wrażeniem, że znalazłeś jakieś dziurawe .edu, który nie zpatchowało dziury na czas. Co więcej,
+ludzie będą jeszcze pod mniejszym wrażeniem, jeśli użyjesz swojego exploita w celu zniszczenia
+rządowej strony WWW ze swoją głupią przemową na temat 'Jaki to ja jestem wielki, a admini
+głupi'.
+Jeszcze inną możliwością użycia tej techniki jest social engineering. Powiedzmy, że
+przeskanowałeś swój cel i nmap zwraca 'Datavoice TxPORT PRISM 3000 T1 CSU/DSU 6.22/2.06'.
+Możesz teraz zadzwonić do tej firmy przedstawiając się jako pomoc techniczna Datavoice i
+przedystkutować kilka spraw dotyczących ich PRISM 3000. "Chcemy ogłosić dziurę w
+bezpieczeństwie, ale wcześniej zależy nam na tym, żeby wszyscy nasi klienci mieli
+zainstalowanego patcha - właśnie go wam wysłałem...". Wielu naiwnych administratorów może
+przypuszczać, że tylko autoryzowany inżynier z Datavoice może tyle wiedzieć o ich CSU/DSU.
+Inną potencjalną możliwością użycia możliwości TCP/IP fingerprinting jest ocena firmy, z którą
+zamierzasz handlować. Zanim wybierzesz swojego nowego ISP, przeskanuj go i dowiedz się, jakiego
+sprzętu używa. Oferty typu '99$/rok' nie brzmią już tak dobrze, kiedy dowiadujesz się, że mają
+gówniane routery i oferują usługi PPP poprzez komputery postawione na Windows.
+
+<font color="#789abc">KLASYCZNE TECHNIKI</font>
+
+Stack fingerprinting jest unikatowym sposobem na rozwiązanie problemu identyfikacji OS'a
+zdalnego hosta. Uważam, że ta technika jest bardzo obiecująca, lecz istnieją również inne
+metody. Przykre, ale ten sposób wciąż jest najbardziej efektywny spośród innych technik : 
+
+playground~> telnet hpux.u-aizu.ac.jp
+Trying 163.143.103.12 ...
+Connected to hpux.u-aizu.ac.jp.
+Escape character is '^]'.
+
+HP-UX hpux B.10.01 A 9000/715 (ttyp2)
+
+login:
+
+Po co bawić się z całym fingerprintgiem, skoro maszyna aż krzyczy na cały świat, co dokładnie
+jest na niej zainstalowane ! Niestety, wielu producentów oprogramowania wyposaża swoje systemy
+w takie banery i wielu administratorów nie wyłącza tej informacji. To, że istnieje
+fingerprinting i inne sposoby na odkrywanie OS'a na zdalnej maszynie nie znaczy że mamy
+pokazywać nasz OS i sprzęt na którym on działa, każdemu, kto tylko zechciał się z nami
+połączyć.
+Problemy wynikające na poleganiu na informacji z takich bannerów polegają przede wszystkim na
+tym, że coraz więcej ludzi decyduje się utajnić te informacje, wiele systemów nie daje za
+dużo informacji, a już trywialnym problemem jest umieszczenie w bannerze fałszywych informacji.
+Niemniej jednak, czytanie bannerów to wszystko co Ci wiadomo na temat OS'a i jego wersji, jeśli
+spędzasz tysiące godzin przed komercyjnym skanerem. W ich miejsce zainstaluj nmap albo queso, a
+oszczędzisz swoje pieniądze :)
+
+Nawet jeśli wyłączysz bannery, wiele aplikacji beztrosko podaje takie informacje. Dla przykładu
+popatrzmy na serwer FTP :
+
+payfonez> telnet ftp.netscape.com 21
+Trying 207.200.74.26 ...
+Connected to ftp.netscape.com.
+Escape character is '^]'.
+220 ftp29 FTP server (UNIX(r) System V Release 4.0) ready.
+SYST
+215 UNIX Type: L8 Version: SUNOS
+
+Przede wszystkim, w bannerze dostajemy szczegółowe informacje na temat OS'a. Jeśli wydamy mu
+komendę 'SYST' dorzuci nam jeszcze więcej informacji.
+
+Jeżeli dostępne jest anonimowe FTP, możemy często zciągnąć /bin/ls lub inną binarkę i
+dowiedzieć się, na jaką architekturę został skomplilowany.
+
+Również wiele innych aplikacji podaje sporo informacji. Weźmy dla przykładu stronę WWW :
+
+playground> echo 'GET / HTTP/1.0\n' | nc hotbot.com 80 | egrep '^Server:'
+Server: Microsoft-IIS/4.0
+playground>
+
+Hmmm... zastanawiałem się, jakiego OS'a używają ci lamerzy :)
+
+Inne klasyczne techniki to rekord info hosta w DNS (chociaż rzadko jest to efektywne) i social
+engineering. Jeśli maszyna ma otwarty port 161/udp (snmp), masz właściwe zagwarantowane mnóstwo
+szczegółowych informacji używając 'snmpwalk' z narzędzi CMU SNMP oraz 'publicznej' nazwy
+(community).
+
+<font color="#789abc">OBECNE PROGRAMY DO FINGERPRINTINGU</font>
+
+Nmap nie jest pierwszy programem do rozpoznawania OS'a za pomocą TCP/IP fingerprintingu. Znany
+spoofer ircowy 'sirc' (napisany przez Johana) ma dołączone dość podstawowe techniki
+fingerprintingu (od wersji 3 albo wcześniejszej). Próbuje umieścić komputer w kategorii
+"Linux", "4.4BSD", "Win95" lub "Unknown" używając kilku prostych testów flag TCP.
+Inny program tego typu to checkos, udostępniony w styczniu tego roku przez Shok in Confidence
+Remains High Issue #7. Techniki fingerprintingu są dokładnie takie same jak w 'sirc', a nawet
+kod w wielu miejscach jest identyczny. Checkos był dostępny prywatnie na długi czas przed jego
+publicznym udostępnieniem, więc nie mam pojęcia komu zakosił kod :) Ale żaden nie dziękuje
+drugiemu.  Jedną rzeczą, którą dodał checkos to sprawdzanie banneru telnetu, co jest
+użyteczne, lecz narażone na problemy opisane wcześniej. [Update : Shok napisał, że w
+zamierzeniach checkos nigdy nie był przeznaczony do publicznego udostępnienia, dlatego też nie
+zaprzątał sobie głowy podziękowaniami dla twórcy 'sirca' za część jego kodu.]
+
+Su1d także napisał program sprawdzający OS. Nazywa się SS i w wersji 3.11 potrafi
+zidentyfikować 12 różnych typów OS'ów. Trochę mam do niego słabość od kiedy wymienił w
+credits'ach mojego nmapa z podziękowaniami za część kodu :).
+
+Potem mamy queso. Ten program jest najnowszy i o wiele wyprzedza pozostałe, nie tylko dlatego,
+że wprowadza kilka nowych testów, ale dlatego że jakos pierwszy (który widziałem) usuwa OS
+fingerprints poza kod. Inne skanery są napisane np:
+
+/* from ss */
+if ((flagsfour & TH_RST) && (flagsfour & TH_ACK) && (winfour == 0) &&
+   (flagsthree & TH_ACK))
+          reportos(argv[2],argv[3],"Livingston Portmaster ComOS");
+
+Zamiast tego, queso przetrzymuje tą informację w pliku konfiguracyjym zmniejszając swój kod i
+czyniąc prostszym dodawanie nowych OS'ów - jako dodanie linijki do pliku z fingerprintami.
+
+Queso został napisany przez Savage - jednego z kolesi z Apostols.org ;)
+
+Jeden problem ze wszystkimi opisanymi wyżej programami jest taki, że są ograniczone w ilości
+testów fingerprint, co ogranicza z kolei dokładność odpowiedzi. Chciałbym wiedzieć więcej niż
+to, że 'this machine is OpenBSD, FreeBSD, or NetBSD', chcę wiedzieć dokładnie który z nich i
+mieć jakąś informację o wersji. Tak samo, wolę zobaczyć 'Solaris 2.6', niż po prostu 'Solaris'.
+Żeby osiągnąć taką dokładność odpowiedzi pracowałem nad kilkoma technikami fingerprintingu,
+które są opisane w następnej sekcji.
+
+<font color="#789abc">METODOLOGIA FINGERPRINTINGU</font>
+
+Jest bardzo wiele technik, które mogą zostać użyte do analizy stosu sieci. Najbardziej
+podstawowa - możesz obejrzeć różnice pomiędzy różnymi OS'ami i napisać coś do wykrywania 
+tych różnic. Jeżeli zgromadzisz ich odpowiednio wiele, możesz dość ściśle określić OS'a. Na
+przykład nmap może dokładnie określić różnice pomiędzy Solarisem 2.4, Solarisem 2.5-2.51 a
+Solarisem 2.6. Potrafi także odróżnić kernel Linuxa 2.0.30 od 2.0.31-34 czy 2.0.25.
+Oto kilka technik : 
+
+Próba flagi FIN - wysyłamy pakiet FIN (lub jakikolwiek inny bez ustawionej flagi ACK lub SYN) na
+otwarty port i czekamy na odpowiedź. Prawidłowe zachowanie (wg. RFC 793) to brak odpowiedzi,
+lecz mnóstwo implementacji takich jak MS Windows, BSDI, CISCO, HP/UX, MVS i IRIX odsyłają
+odpowiedź RESET. Większość narzędzi wykorzystuje tą technikę.
+
+Próba niewłaściwej flagi - queso jest pierwszym skanerem w którym widziałem ten test. Idea
+polega na wysłaniu niezdefiniowanej flagi TCP (64 albo 128) w nagłówku TCP pakietu SYN. Maszyny
+z Linuxem wcześniejszym niż 2.0.35 zachowują tą flagę przy przesyłaniu odpowiedzi. Nie
+znalazłem innego OS'a podatnego na ten bug, chociaż jest kilka OS'ów które resetują połączenie
+po otrzymaniu tak spreparowanego pakietu. Takie zachowanie może ułatwić ich identyfikację.
+
+Próba TCP ISN - pomysł opiera się na znalezieniu wzoru w początkowej sekwencji numerów
+wybranych przez implementację TCP przy odpowiedzi na połączenie. Można podzielić je na kilka
+grup, takich jak tradycyjne 64K (dużo starszych UNIXów), losowa inkrementacja (nowsze wersje
+Solarisa, IRIX, FreeBSD, Digital UNIX, Cray i wiele innych), prawdziwe losowe (Linux 2.0.*,
+OpenVMS, nowsze AIX etc.). Komputery z Windows (i kilka innych) używają inkremantacji opartej
+na upływie czasu, gdzie ISN jest inkrementowany o stałą, niewielką część podczas każdego
+'tyknięcia zegara'. Muszę powiedzieć, że jest to niemal tak proste do odgadnięcia, jak stare
+implementacje (64K). Oczywiście moją ulubioną techniką jest 'constant' - te urządzenie zawsze
+używają tego samogo ISN. Widziałem to na niektórych hubach 3Com (używają 0x803) i drukarkach 
+Apple LaserWriter (0xC7001).
+
+Można również grupować to w mniejsze podklasy, dzieląc np. na inkrementację losową przez 
+obliczanie wariancji, przez największą wspólną wielokrotność czy inne funkcje.
+
+W tym miejscu muszę wspomnieć, że generowanie ISN jest istotne ze względów bezpieczeństwa. Żeby
+uzyskać więcej szczegółów na ten temat, skontaktuj się z 'ekspertem od bezpieczeństwa' 
+Tsutomu "Shimmy" Shimomura w SDSC i zapytaj go, w jaki sposób włamano się do niego. Nmap 
+jest pierwszym programem, jaki znam używający tego sposobu identyfikacji OS'a.
+
+Bit "Don't Fragment" - wiele systemów operacyjnych ustawia bit "Don't Fragment" w nagłówku IP
+pakietów, które wysyłają. Ta informacja daje nam pewne korzyści (jakkolwiek może być
+denerwująca - 'fragment scan' nmap'a nie działa na komputerach z Solarisem. W każdym razie, nie
+wszystkie OS'y ustawiają ten bit i robią to na różne sposoby, więc zwracając uwagę na ten bit
+możemy uzyskać sporo informacji na temat danego komputera. Nie widziałem jeszcze nigdzie
+zaimplementowanej tej metody.
+
+TCP Initial Window - dotyczy to sprawdzania rozmiaru okna powracających pakietów. Stare skanery
+stwierdzają "BSD 4.4" przy wykryciu nie-zerowego okna pakietu RST. Te nowsze, jak queso i nmap
+zwracają uwagę na dokładny rozmiar okna, który jest stały dla danego OS'a. Ten test daje nam
+sporo informacji, ponieważ część OS'ów może być dokładnie zidentyfikowana tylko na podstawie
+okna (np. AIX jest jedynym systemem jaki znam, używającum rozmiaru 0x3F25). W "kompletnie
+przepisanym" stosie TCP dla NT5 Microsoft używa 0x402E. Co ciekawe, jest to dokładnie ten sam
+numer, jakiego używają Open i FreeBSD.
+
+Wartość ACK - choć może się wydawać, że powinien to być standard, różne implementacje używają
+różnych wartości ACK w różnych przypadkach. Na przykład, powiedzmy że wysłałeś FIN|PSH|URG żeby
+zamknąć port TCP. Większość implementacji ustawi jako ACK twoją wartość początkową (initial
+sequence number - SEQ), chociaż Windows i część co głupszych drukarek odeśle SEQ+1. Jeśli
+wyślesz SYN|FIN|URG|PSH na otwarty port, Windows zachowuje się bardzo niekonsekwentnie. Czasami
+odeśle twoje SEQ, czasami SEQ++, a jeszcze kiedy indziej pseudolosową wartość. 
+
+ICMP Error Message Quenching - co mądrzejsze OS'y, zgodnie z RFC 1812 limitują liczbę
+zwracanych komunikatów o błędach. Na przykład, kernel Linuxa (net/ipv4/icmp.h) ogranicza liczbę
+wygenerowanych wiadomości 'destination unreachable' do 80 na 4 sekundy. Jeśli ta liczba zostanie
+przekroczona, wprowadza przerwy 1/4 sekundy. Jedynym sposobem na przeprowadzenie tego testu jest 
+wysłanie jakiejś ilości pakietów na losowy, wysoki port UDP i zliczenie ilości powracających 
+pakietów 'destination unreachable'. Nie widziałem nigdzie zaimplementowanego tego sposobu i 
+w sumie nie włączyłem go do nmap'a (poza skanowaniem portów UDP). Ten sposób skanowania zabiera 
+więcej czasu, ponieważ potrzebujesz wysłać wiele pakietów i czekać na ich odbiór. Możliwość 
+błąkania się po sieci dużej ilości odrzuconych pakietów też nie jest najprzyjemniejsza ;)
+
+ICMP Message Quoting - RFC określają, że pakiety ICMP z informacjami o błędach zawierają w
+sobie części komunikatów, które ten błąd wywołują. Dla 'port unreachable' prawie wszystkie
+implementacje odsyłają tylko żądany nagłówek IP i 8 bajtów. Jednak Solaris odsyła trochę
+więcej, a Linux jeszcze więcej niż Solaris. Największą zaletą jest fakt, że ta metoda pozwala
+nmap'owi rozpoznać maszyny z Solarisem i Linuxem nawet wtedy, kiedy nie mają otwartych żadnych
+portów.
+
+ICMP Error message echoing integrity - ten pomysł zapożyczyłem od Theo De Raadt (główny
+developer OpenBSD). Jak wspomniałem wcześniej, komputery odsyłają część orginalnego komunikatu
+razem z błędem 'port unreachable'. Mimo to część implementacji wykorzystuje orginalny nagłówek
+jako miejsce do skasowania, dostajesz więc te dane przekłamane. Na przykład, AIX i BSDI
+odsyłają pole 'IP total length' powiększone o 20 bajtów. Część BSDI, FreeBSD, OpenBSD, ULTRIX i
+VAXen pieprzy otrzymane IP ID. Chociaż suma kontrolna powinna zmieniać się wraz ze zmienionym
+TTL, część implementacji (AIX, FreeBSD) zwracają sumę kontrolną równą 0 lub inną dziwną liczbę.
+Różne rzeczy dzieją się też z sumą kontrolną UDP. Ogólnie rzecz biorąc, nmap wykonuje 9 różnych
+testów na błędach ICMP, żeby wychwycić tak subtelne różnice pomiędzy nimi.
+
+Typ usługi - sprawdzałem wartość TOS (Type of Service) pakietów zwracanych z błędem 'port
+unreachable'. Prawie wszystkie implementacje używają 0, ale Linux używa 0xC0. Nie jest żadna ze
+standardowych wartości TOS, lecz część nieużywanego (AFAIK) pola pierwszeństwa (precedence
+field). Nie wiem, dlaczego jest to ustawiane, ale jeśli otrzymamy 0, będziemy wiedzieć, że to
+stara wersja i będziemy w stanie odróżnić starą od nowej. 
+
+Fragmentation Handling - to ulubiona technika Thomasa Ptacek'a z Secure Networks Inc (obecnie
+zarządzane przez windziarzy z NAI). Polega ona na tym, że różne implementacje składają w różny
+sposób podzielone fragmenty IP. Część nadpisuje starą cześć nowymi
+danymi, część 'puszcza przodem' starsze dane. Istnieje wiele testów, których możesz użyć do
+stwierdzenia, w jaki sposób pakiet został złożony. Nie dodałem tej możliwości, ponieważ nie
+wiem, w jaki sposób można (przenośnie - portable) przesłać fragmenty IP (w szczególności jest
+to trudne na Solarisie). Po więcej informacji na temat 'overlapping fragments' sięgnij do
+www.secnet.com.
+
+Opcje TCP - to naprawdę żyła złota, jeśli chodzi o wyciąganie informacji. Ich piękno polega na : 
+
+1) są to opcje ogólne, więc nie wszystkie maszyny mają je zaimplementowane
+2) wiesz, czy dany host ma je zaimplementowane wysyłając pakiet z ustawioną odp. opcją. Jeśli
+dany host akceptuje taką opcję, odsyła ją ustawioną.
+3) możesz sprawdzić naraz kilka opcji, wysyłając tylko jeden pakiet.
+
+Nmap wysyła te opcje przy prawie każdym pakiecie próbnym:
+
+Window Scale=10; NOP; Max Segment Size = 265; Timestamp; End of Ops;
+
+Kiedy otrzymasz odpowiedź, zobacz które opcje są ustawione, czyli działające. Niektóre OS'y,
+jak ostatnie wersje FreeBSD wspierają wszystkie, ale są też takie, jak Linux 2.0.x które
+odpowiadają tylko na kilka. Ostatnie kernele 2.1.x mają support dla wszystkich powyższych. Z
+drugiej strony, są bardziej narażone na na przewidywanie TCP sequence.
+
+Nawet jeśli różne systemy operacyjne zawierają implementacje tego samego zestawu opcji, możesz
+rozpoznać je po wartościach tych opcji. Na przykład, jeśli wyślesz małą wartość MSS do maszyny
+z Linuxem, ogólnie rzecz biorąc, odeśle ci ją z powrotem. Inne maszyny odeślą inne wartości.
+Nawet jeśli otrzymasz z powrotem ustawione te same opcje _i_ te same wartości, wciąż możesz
+rozpoznać je po kolejności. Na przykład Solaris zwraca
+NNTNWME, co znaczy :
+<no op><no op><timestamp><no op><window scale><echoed MSS>
+
+a Linux 2.1.122 zwraca MENNTNW. Te same opcje, te same wartości, ale inna kolejność.
+
+Nie widziałem jeszcze żadnego narzędzia do identyfikacji OS'a używającego opcji TCP, choć są
+bardzo użyteczne. Jest też kilka innych pożytecznych opcji który można próbwać, np. wsparcie
+dla T/TCP i potwierdzenia selektywne (selective ackonwledgements).
+
+chronologia exploitów - nawet po wykonaniu wszystkich powyższych testów, nmap nie może
+rozróżnić stosów TCP Win95, Win98 czy WinNT, co jest raczej dziwne, zwłaszcza że Win99 wyszedł
+ok. 4 lat po Win95 ;). Można by pomyśleć, że ulepszyli ten stos (np. dodali obsługę
+większej ilości opcji TCP), co dałoby nam możliwość rozróżnienia ich od siebie. Niestety, nie
+w tym przypadku ;) Stos NT jest najprawdopodobniej taki sam, jak w Win95. I nie zawracali
+sobie też głowy jego upgrade'm w Win98.
+Nie poddawaj się - istnieje rozwiązanie. Możesz spróbować wczesnych ataków DoS na Windows
+(Ping of Death, Winnuke), próbując następnie trochę nowsze (Teardrop, Land). Po każdym ataku,
+pinguj je i zobacz, czy się wywaliły. Kiedy padną, będziesz wiedział z dość sporą dokładnością 
+jakie hotfixy/servicepacki ma zainstalowane.
+Nie dodałem tej opcji do nmap'a, chociaż muszę przyznać, że jest to kuszące :)
+
+odporność na SYN Flood - cześć OS'ów przestanie akceptować nowe połączenia, jeśli wyślesz
+do nich za dużo fałszywych pakietów SYN (fałszowanie pakietów pozwala uniknąć problemów z 
+restartowaniem połączeń przez jądro).  Wiele OS'ów może odebrać tylko 8 pakietów. Nowsze kernele
+Linuxa (oraz inne systemy operacyjne) wykorzystują mechanizm SYN cookies w celu zapobiegania
+tym problemom. Możesz więc dowiedzieć się czegoś o danym OS'ie wysyłając 8 pakietów ze
+sfałszowanego źródła na jakiś otwarty port i sprawdzając, czy sam możesz nawiązać połączenie 
+z tym portem. Ta opcja nie została dodana do nmap'a, ponieważ sporo osób denerwowało się,
+kiedy zasypywałeś ich SYN floodem. Nawet tłumaczenie, że chciałeś tylko sprawdzić, jaki OS
+mają uruchomiony nie pomagało ich uspokoić :)
+
+<font color="#789abc">IMPLEMENTACJA NMAP'A</font>
+
+Stworzyłem implementację wspomnianych wyżej technik wykrywania OS'ów, z wyjątkiem tych, które
+z góry wyłączyłem. Dodałem je do nmap'a, który ma również taką zaletę, iż wie, które porty są
+otwarte/zamknięte do fingerprintingu, więc nie musisz mu ich podawać. Nmap jest kompilowalny
+na Linuxie, *BSD, Solarisie 2.51 i 2.6 oraz na kilku innych OS'ch.
+Nowa wersja nmapa czyta plik w którym zawarte są szablony Fingerprinta napisane wg. prostej
+gramatyki. Oto przykład :
+
+FingerPrint  IRIX 6.2 - 6.4 # Thanks to Lamont Granquist
+TSeq(Class=i800)
+T1(DF=N%W=C000|EF2A%ACK=S++%Flags=AS%Ops=MNWNNT)
+T2(Resp=Y%DF=N%W=0%ACK=S%Flags=AR%Ops=)
+T3(Resp=Y%DF=N%W=C000|EF2A%ACK=O%Flags=A%Ops=NNT)
+T4(DF=N%W=0%ACK=O%Flags=R%Ops=)
+T5(DF=N%W=0%ACK=S++%Flags=AR%Ops=)
+T6(DF=N%W=0%ACK=O%Flags=R%Ops=)
+T7(DF=N%W=0%ACK=S%Flags=AR%Ops=)
+PU(DF=N%TOS=0%IPLEN=38%RIPTL=148%RID=E%RIPCK=E%UCK=E%ULEN=134%DAT=E)
+
+Spójrzmy na pierwszą linię (dodaję znaczniki '>') : 
+
+> FingerPrint  IRIX 6.2 - 6.3 # Thanks to Lamont Granquist
+
+Mówi nam to tyle, że fingerprint odejmuje IRIX'y 6.2 do 6.3, a Lamont Granquist podesłał mi
+adresy IP albo fingerprinty testowanych maszyn IRIX'owych.
+
+> TSeq(Class=i800)
+
+Oznacza to, że ISN sampling należy do klasy 'i800', czyli kolejny numer jest większy od 
+wcześniejszego o 800.
+
+> T1(DF=N%W=C000|EF2A%ACK=S++%Flags=AS%Ops=MNWNNT)
+
+Test nazwany jest T1 (od test1, prawda że mądre ;p ?). W tym teście wysyłamy pakiet SYN z
+ustawionymi kilkoma opcjami na otwarty port. DF=N oznacza, że bit "Don't fragment" nie może 
+zostać ustawiony w odpowiedzi. W=C000|EF2A oznacza, że okno oferowane (advertised window)
+musi być równe 0xC000 albo 0xEF2A. ACK=S++ mówi, że potwierdzenie jakie otrzymamy musi być 
+naszą sekwencją inicjującą (initial sequence) zwiększoną o 1. Flags=AS oznacza, że flagi ACK 
+i SYN zostały wysłane w odpowiedzi. Ops=MNWNNT mówi, że opcje w odpowiedzi muszą być w następującym
+porządku:
+
+<MSS (not echoed)><NOP><Window scale><NOP><NOP><Timestamp>
+
+> T2(Resp=Y%DF=N%W=0%ACK=S%Flags=AR%Ops=)
+
+Test 2 dotyczy NULL z takimi samymi opcjami na otwarty port. Resp=y oznacza, że musimy uzyskać
+odpowiedź. Ops= oznacze, że żadne opcje nie muszą być ustawione w pakiecie zwrotnym. Wycinając
+całkowicie '%Ops=' uzyskujemy, że będzie pasował każdy zestaw opcji.
+
+> T3(Resp=Y%DF=N%W=400%ACK=S++%Flags=AS%Ops=M)
+
+Test 3 to opcje SYN|FIN|URG|PSH wysłane na otwarty port.
+
+> T4(DF=N%W=0%ACK=O%Flags=R%Ops=)
+
+ACK na otwarty port. Zauważ, że nie mamy tutaj Resp=. Oznacza to, że brak odpowiedzi (pakiet
+został zgubiony w sieci lub nie przepuszczony przez firewall) nie dyskwalifikuje wzorca, jeśli
+inne testy pasują. Zrobiliśmy tak, ponieważ w zasadzie każdy OS odeśle odpowiedź, więc brak
+odpowiedzi to najczęściej wina sieci,a nie samego OS'a. Resp jest w testach 2 i 3, ponieważ
+część systemów może je odrzucić bez odpowiadania.
+
+> T5(DF=N%W=0%ACK=S++%Flags=AR%Ops=)
+> T6(DF=N%W=0%ACK=O%Flags=R%Ops=)
+> T7(DF=N%W=0%ACK=S%Flags=AR%Ops=)
+
+Testy SYN, ACK i FIN|PSH|URG na zamknięte porty. Zawsze ustawione są te same opcje. 
+(? probably obvious given the descriptive names 'T5', 'T6', and 'T7' :). ?)
+
+> PU(DF=N%TOS=0%IPLEN=38%RIPTL=148%RID=E%RIPCK=E%UCK=E%ULEN=134%DAT=E)
+
+To duże coś to test 'port unreachable'. Powinieneś już wiedzieć, co znaczy DF=N. TOS=0
+oznacza, że pole IP 'type of service' jest równe 0. Następne dwie wartości podają wartości pól
+'IP total length field' nagłówka IP i całkowitą długość podaną w odpowiedzi. RID=E oznacza, 
+że oczekiwana jest wartość RID, którą dostaniemy w zwrocie naszego orginalnego pakietu UDP.
+RIPCK=E oznacza, że suma kontrolna nie została spieprzona (jeśli była, RIPCK=F). 
+UCK=E - wartość UDP też jest poprawna.  Następnie jest długość UDP (0x134); DAT=E oznacza że 
+dane w UDP zostały zwrócone prawidłowo.
+Od czasu, kiedy większość implementacji (łącznie z tą) nie zwraca w ogóle danych UDP, DAT=E
+ustawiane jest domyślnie.
+
+Wersja nmap'a z tą funkcją jest w 6-tej fazie prywatnych beat-testów. Może pojawić się w
+momencie, kiedy będziesz czytał to w Phracku - ale może też nie. Zobacz na
+http://insecure.org , gdzie znajdziesz najnowszą wersję.
+
+<font color="#789abc">KILKA POPULARNYCH SERWERÓW</font>
+
+Mamy tu zabawne rezultaty całego naszego wysiłku. Weźmy losowe maszyny w Internecie i
+sprawdźmy, na jakim OS'ie stoją. Większość z nich ma wyłączone bannery telnet'u itp. żeby nie
+ujawniać tych informacji. Ale to na nic - mamy nowego fingerprintera ;> Jest to dobry sposób
+na pokazanie użytkownikom <twój_ulubiony_gówniany_OS, jak Windows :)> jakimi są lamerami ;)
+
+W tym przykładzie nmap został użyty w sposób : nmap -sS -p 80 -O -v <host>
+
+Zwróć uwagę, że większość tych skanów została przeprowadzona 18.X.1998. Część tych gostów może
+już być zmieniona/upgrade'nięta.
+
+Nie wszystkie site'y tutaj lubię.
+
+# "Hacker" sites or (in a couple cases) sites that think they are
+www.l0pht.com        => OpenBSD 2.2 - 2.4
+insecure.org     => Linux 2.0.31-34
+www.rhino9.ml.org    => Windows 95/NT     # No comment :)
+www.technotronic.com => Linux 2.0.31-34
+www.nmrc.org         => FreeBSD 2.2.6 - 3.0
+www.cultdeadcow.com  => OpenBSD 2.2 - 2.4
+www.kevinmitnick.com => Linux 2.0.31-34  # Free Kevin!
+www.2600.com         => FreeBSD 2.2.6 - 3.0 Beta
+www.antionline.com   => FreeBSD 2.2.6 - 3.0 Beta
+www.rootshell.com    => Linux 2.0.35  # Changed to OpenBSD after
+ 					                  # they got owned.
+
+# Security vendors, consultants, etc.
+www.repsec.com       => Linux 2.0.35
+www.iss.net          => Linux 2.0.31-34
+www.checkpoint.com   => Solaris 2.5 - 2.51
+www.infowar.com      => Win95/NT
+
+# Vendor loyalty to their OS
+www.li.org           => Linux 2.0.35 # Linux International
+www.redhat.com       => Linux 2.0.31-34 # I wonder what distribution :)
+www.debian.org       => Linux 2.0.35
+www.linux.org        => Linux 2.1.122 - 2.1.126
+www.sgi.com          => IRIX 6.2 - 6.4
+www.netbsd.org       => NetBSD 1.3X
+www.openbsd.org      => Solaris 2.6     # Ahem :) (its because UAlberta
+                                        # is hosting them)
+www.freebsd.org      => FreeBSD 2.2.6-3.0 Beta
+
+# Ivy league
+www.harvard.edu      => Solaris 2.6
+www.yale.edu         => Solaris 2.5 - 2.51
+www.caltech.edu      => SunOS 4.1.2-4.1.4  # Hello! This is the 90's :)
+www.stanford.edu     => Solaris 2.6
+www.mit.edu          => Solaris 2.5 - 2.51 # Coincidence that so many good
+                                           # schools seem to like Sun?
+                                           # Perhaps it is the 40% .edu discount :)
+www.berkeley.edu     => UNIX OSF1 V 4.0,4.0B,4.0D
+www.oxford.edu       => Linux 2.0.33-34  # Rock on!
+
+# Lamer sites
+www.aol.com          => IRIX 6.2 - 6.4  # No wonder they are so insecure :)
+www.happyhacker.org  => OpenBSD 2.2-2.4 # Sick of being owned, Carolyn?
+                                        # Even the most secure OS is
+	                                    # useless in the hands of an 
+									    # incompetent admin
+
+# Misc
+www.lwn.net          => Linux 2.0.31-34 # This Linux news site rocks!
+www.slashdot.org     => Linux 2.1.122 - 2.1.126
+www.whitehouse.gov   => IRIX 5.3
+sunsite.unc.edu      => Solaris 2.6
+
+Notes: Microsoft w swoim tekście nt bezpieczeństwa powiedział "to założenie zmieniło się przez
+lata, podczas których Windows NT zyskał dużą popularność ze względu na swoje zabezpieczenia".
+Hm... z tego miejsca nie wydaje mi się, żeby NT zyskał zbyt duża popularność wśród
+społeczności ludzi zajmującej się bezpieczeństwem :) Widzę tylko 2 maszyny z NT w całej
+grupie, a Windows jest łatwy do rozpoznania przez nmap'a.
+
+Oczywiście, jest jeszcze jeden host, który musimy sprawdzić. To strona WWW ultra-tajnej
+organizacji Transmeta. Interesujące, że została w głównej części założona przez Paula Allena z
+Microsoftu, a pracuje tam Linus Torvalds. Czy został tam NT, czy przyłączyli się do rewolucji
+Linuxa ? Zobaczmy :
+
+Użyjemy nmap'a w ten sposób : nmap -sS -F -o transmeta.log -v -O www.transmeta.com//24
+
+Skan SYN na znane porty (z /etc/services), loguje wyniki do 'transmeta.log', uruchomiony jest
+w trybie werbalnym (verbose mode), sprawdza typ OS'a skanując klasę C - sieć, gdzie znajduje
+się www.transmeta.com. Oto najważniejsze z rezultatów :
+
+neon-best.transmeta.com (206.184.214.10) => Linux 2.0.33-34
+www.transmeta.com (206.184.214.11) => Linux 2.0.30
+neosilicon.transmeta.com (206.184.214.14) => Linux 2.0.33-34
+ssl.transmeta.com (206.184.214.15) => Linux unknown version
+linux.kernel.org (206.184.214.34) => Linux 2.0.35
+www.linuxbase.org (206.184.214.35) => Linux 2.0.35 ( possibly the same
+                                      machine as above )
+
+Myślę, że odpowiedź na nasze pytanie jest całkiem jasna :)
+
+<font color="#789abc">PODZIĘKOWANIA</font>
+
+Nmap nie byłby w stanie wykryć tak wiele różnych OS'ów, gdyby nie pomoc wielu ludzi z
+prywatnego beta-team w wynajdywaniu nowych i ekscytujących maszyn do fingerprintu ! W
+szczególności Jan Koum, van Hauser, Dmess0r, David O'Brien, James
+W. Abendschan, Solar Designer, Chris Wilson, Stuart Stock, Mea Culpa,
+Lamont Granquist, Dr. Who, Jordan Ritter, Brett Eldridge, and Pluvius
+wysłali mi tony IP różnych maszyn i/lub fingerprinty maszyn nie osiągalnych przez Internet.
+
+Podziękowania dla Richarda Stallmana za napisanie GNU Emacs. Ten artykuł nie byłby tak
+porządnie ułożony, gdybym używał vi czy cat i ^D.
+
+Pytania i komentarze można wysyłać do fyodor@insecure.org. Nmap'a można zciągnąć z
+http://insecure.org/nmap.
